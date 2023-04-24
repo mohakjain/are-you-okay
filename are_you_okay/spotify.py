@@ -20,7 +20,7 @@ def login():
     if cachedToken and not spotifyAuth.is_token_expired(cachedToken):
         token = cachedToken['access_token']
         session['access_token'] = token
-        return redirect(url_for('spotify.getData'))
+        return redirect(url_for('spotify.are_you_okay'))
     else:
         loginUrl = spotifyAuth.get_authorize_url()
         return redirect(loginUrl)
@@ -33,26 +33,64 @@ def setToken():
     session['access_token'] = access_token
     return redirect(url_for('spotify.are_you_okay'))
 
-# Get user's spotify data
 @bp.route('/are_you_okay', methods=['GET'])
+def are_you_okay():
+    topArtists, topSongs = getData()
+    percentOkay, topSongs = determineOkayness(topArtists, topSongs)
+    print(percentOkay*100, "% okay")
+
+    # print all songs and okayness
+    for song in topSongs:
+        print(song['track_name'], song['okayness'])
+
+    return render_template('hello.html')
+
+def determineOkayness(topArtists, topSongs):
+
+    # Heurestic via OLS
+    weights = {
+        'danceability': 1.13672760,
+        'energy': .707503208,
+        'loudness': -.0216086695,
+        'acousticness': -.181718205,
+        'valence': .260874576,
+        'instrumentalness': .0799966934,
+        'tempo': -.000139013606
+    }
+    offset= -0.7663552990979238
+    threshold = 0.6
+
+    okay = 0
+    for song in topSongs:
+        song['okayness'] = 0
+        for feature in song:
+            if feature in weights:
+                song['okayness'] += song[feature] * weights[feature]
+        song['okayness'] += offset
+        if song['okayness'] > threshold:
+            okay += 1
+    
+    topSongs.sort(key=lambda x: x['okayness'])
+    percentOkay = okay/len(topSongs)
+    # now we need to determine okayness based on artists. I'll check if any artist is in my list of not okay artists and subtract a little bit from the okay score if so.
+    for artist in topArtists:
+        if artist in notOkayArtists:
+            percentOkay -= 0.05
+
+    return percentOkay, topSongs
+
+# Get user's relevant spotify data
 def getData():
     access_token = session['access_token']
     spotifyAPI = spotipy.Spotify(access_token)
     
     # Fetch the user's top 50 artists
     topArtists = getTopArtists(spotifyAPI)
-    print([t["artist_name"] for t in topArtists])
  
     # Fetch the user's top songs
     topSongs = getTopSongs(spotifyAPI)
-    print(len(topSongs))
-    print([t["track_name"] for t in topSongs])
 
-
-
-    return render_template('hello.html')
-    return render_template('user.html', user=user)
-
+    return topArtists, topSongs
 
 
 # Fetch the user's top 50 artists
@@ -75,8 +113,6 @@ def getTopSongs(spotifyAPI: spotipy.Spotify):
         song = {}
         song['artist_name'] = t['artists'][0]['name']
         song['track_name'] = t['name']
-        song['album_name'] = t['album']['name']
-        song['album_image'] = t['album']['images'][0]['url']
         song['track_id'] = t['id']
         trackIds.add(song['track_id'])
         topSongs.append(song)
@@ -89,10 +125,31 @@ def getTopSongs(spotifyAPI: spotipy.Spotify):
             song = {}
             song['artist_name'] = t['artists'][0]['name']
             song['track_name'] = t['name']
-            song['album_name'] = t['album']['name']
-            song['album_image'] = t['album']['images'][0]['url']
             song['track_id'] = t['id']
             trackIds.add(song['track_id'])
             topSongs.append(song)
     
+    # can make this more efficient by storing topSongs in a dict
+    audioFeatures = spotifyAPI.audio_features(tracks=list(trackIds))
+    for features in audioFeatures:
+        for song in topSongs:
+            if features['id'] == song['track_id']:
+                song['danceability'] = features['danceability']
+                song['energy'] = features['energy']
+                song['loudness'] = features['loudness']
+                song['acousticness'] = features['acousticness']
+                song['instrumentalness'] = features['instrumentalness']
+                song['valence'] = features['valence']
+                song['tempo'] = features['tempo']
+                break
+    
     return topSongs
+
+
+notOkayArtists = ["Phoebe Bridgers"]
+
+
+def printSongData(songs):
+    for song in songs:
+        # print song attributes separated by tabs
+        print(song['track_name'], "\t", song['danceability'], "\t", song['energy'], "\t", song['loudness'], "\t", song['acousticness'], "\t", song['instrumentalness'], "\t", song['valence'], "\t", song['tempo'], "\t", song['okayness'])
