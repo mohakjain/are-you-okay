@@ -43,6 +43,9 @@ def are_you_okay():
     for song in topSongs:
         print(song['track_name'], song['okayness'])
 
+    # flask can return a dict of variables to the react app
+    return {'percentOkay': percentOkay, 'topSongs': topSongs}
+
     return render_template('hello.html')
 
 def determineOkayness(topArtists, topSongs):
